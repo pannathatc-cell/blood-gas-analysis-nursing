@@ -20,6 +20,7 @@ Owner: อาจารย์ปัณณทัต จันพานิช, Facu
 ## App structure (index.html)
 - Tabs: `#interp` (ABG interpretation + nursing care + SBAR), `#game` (GBL: balloon / shooter / clinical), `#dash` and `#usage` (admin only).
 - Players sign in with a nickname only. Admin = typing the admin code in the nickname box (checked against `ADMIN_HASH`, SHA-256). Admin key is kept in localStorage `abg.adminKey` and sent to Apps Script to read data.
+- `Session` = time-on-app tracker: counts only visible + active (input within 5 min) time; heartbeat every 60 s and `sendBeacon` on hide/leave; posts `saveSession` → Visits cols E (ใช้งานล่าสุด) and F (เวลาใช้งาน (นาที)).
 - `Store` = Google Sheets layer: saves to localStorage first, posts to `SHEET_API`, queues offline posts in `abg.queue`; admin dashboards pull every 30 s.
 - Interpretation: `interpretABG(ph, paco2, hco3, o2rx, pao2, be)`; normal PaO₂ 80–100 mmHg, BE −2…+2 mmol/L. SpO₂ was removed on request.
 - Characters: `MASCOT` map of data URIs; slots use `data-mascot="<key>"`, popup text via `data-say`. Male nurse salute frames (`boyN_*`) animate a wink via `img.frames`.

@@ -2875,21 +2875,97 @@ function openGate() {
 function logVisit() {
   if (!playerOk() || isAdmin()) return;
   try { sessionStorage.setItem("abg.visit", "1"); } catch (e) { }
-  Store.saveVisit({
+  const v = {
     id: "v" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     kind: "visit",
     name: PLAYER.name, gender: PLAYER.gender, role: PLAYER.role,
     sid: PLAYER.sid || "", group: PLAYER.group || "",
-    at: new Date().toISOString()
-  });
+    at: new Date().toISOString(), sec: 0
+  };
+  Store.saveVisit(v);
+  Session.begin(v);
 }
+
+/* ---- time-on-app: counts only while the page is visible and the user was active in the last 5 minutes ---- */
+const IDLE_MS = 5 * 60 * 1000;
+const Session = {
+  vid: "", name: "", at: "", active: 0, lastTick: 0, lastInput: Date.now(), hb: 0, lastSent: -1,
+  begin(v) {
+    this.vid = v.id; this.name = v.name; this.at = v.at; this.active = 0;
+    this.lastTick = Date.now(); this.lastInput = Date.now(); this.lastSent = -1;
+    this.persist(); this.startBeat();
+  },
+  resume() {
+    const o = (() => { try { return JSON.parse(sessionStorage.getItem("abg.session") || "null"); } catch (e) { return null; } })();
+    if (!o || !PLAYER || o.name !== PLAYER.name || isAdmin()) return;
+    Object.assign(this, { vid: o.vid, name: o.name, at: o.at, active: o.active || 0 });
+    this.lastTick = Date.now(); this.lastInput = Date.now(); this.lastSent = -1;
+    this.startBeat();
+  },
+  persist() {
+    try { sessionStorage.setItem("abg.session", JSON.stringify({ vid: this.vid, name: this.name, at: this.at, active: this.active })); } catch (e) { }
+  },
+  tick() {
+    if (!this.vid) return;
+    const now = Date.now();
+    if (!document.hidden) {
+      const until = Math.min(now, this.lastInput + IDLE_MS);
+      if (until > this.lastTick) this.active += until - this.lastTick;
+    }
+    this.lastTick = now;
+    this.persist();
+    const lv = Store.vLocal.find(x => x.id === this.vid);
+    if (lv) { lv.sec = Math.round(this.active / 1000); LS.set("abg.visits", Store.vLocal); }
+  },
+  payload() {
+    return {
+      action: "saveSession", id: "s" + this.vid, sec: Math.round(this.active / 1000),
+      lastAt: new Date().toISOString(), visit: { id: this.vid, name: this.name, at: this.at }
+    };
+  },
+  send(useBeacon) {
+    this.tick();
+    if (!this.vid || !SHEET_ON) return;
+    const sec = Math.round(this.active / 1000);
+    if (sec < 5 || sec === this.lastSent) return;
+    this.lastSent = sec;
+    const body = JSON.stringify(this.payload());
+    if (useBeacon && navigator.sendBeacon) {
+      try { if (navigator.sendBeacon(SHEET_API, new Blob([body], { type: "text/plain" }))) return; } catch (e) { }
+    }
+    Store.post(JSON.parse(body)).then(ok => { if (!ok) Store.enqueue(JSON.parse(body)); });
+  },
+  startBeat() {
+    clearInterval(this.hb);
+    this.hb = setInterval(() => { if (!document.hidden) this.send(false); }, 60000);
+  },
+  end() {
+    this.send(true);
+    clearInterval(this.hb); this.hb = 0; this.vid = "";
+    try { sessionStorage.removeItem("abg.session"); } catch (e) { }
+  }
+};
+["pointerdown", "keydown", "touchstart", "wheel", "scroll"].forEach(t =>
+  addEventListener(t, () => { if (Session.vid && Date.now() - Session.lastInput > IDLE_MS) Session.tick(); Session.lastInput = Date.now(); },
+    { passive: true, capture: true }));
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { Session.tick(); Session.send(true); }
+  else { Session.lastTick = Date.now(); Session.lastInput = Date.now(); }
+});
+addEventListener("pagehide", () => Session.send(true));
+const fmtDur = sec => {
+  sec = Math.max(0, Math.round(+sec || 0));
+  if (sec < 60) return sec + " วินาที";
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60);
+  return h ? `${h} ชม. ${m} นาที` : `${m} นาที${sec % 60 && m < 10 ? " " + (sec % 60) + " วินาที" : ""}`;
+};
 function initIdentity() {
   paintWho();
   applyAdmin();
   if (!playerOk()) { openGate(); return; }
   let seen = false;
   try { seen = sessionStorage.getItem("abg.visit") === "1"; } catch (e) { }
-  if (!seen) logVisit();
+  if (!seen) logVisit(); else Session.resume();
 }
 
 $("#pRole").addEventListener("change", syncStuFields);
@@ -2914,6 +2990,7 @@ $("#gate").addEventListener("keydown", ev => {
 });
 $("#btnChangeId").addEventListener("click", () => {
   quit();
+  Session.end();
   PLAYER = null; LS.set("abg.player", null);
   try { sessionStorage.removeItem("abg.visit"); } catch (e) { }
   ["pName", "pSid", "pGroup", "pGender", "pRole"].forEach(id => { $("#" + id).value = ""; });
@@ -3468,6 +3545,8 @@ function renderUsage() {
   const fmt = at => at ? new Date(at).toLocaleString("th-TH",
     { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 
+  const totSec = data.reduce((a, v) => a + (+v.sec || 0), 0);
+  const nTimed = data.filter(v => +v.sec > 0).length;
   body.innerHTML = `
   <div class="kpis">
     <div class="kpi hero">
@@ -3479,6 +3558,16 @@ function renderUsage() {
       <span class="k-l">ผู้ใช้ไม่ซ้ำ</span>
       <span class="k-n">${users.size}</span>
       <span class="k-s">เฉลี่ย ${(total / users.size).toFixed(1)} ครั้งต่อคน</span>
+    </div>
+    <div class="kpi">
+      <span class="k-l">เวลาใช้งานรวม</span>
+      <span class="k-n">${fmtDur(totSec)}</span>
+      <span class="k-s">นับเฉพาะช่วงที่เปิดหน้าแอปและใช้งานจริง</span>
+    </div>
+    <div class="kpi">
+      <span class="k-l">เวลาเฉลี่ยต่อครั้ง</span>
+      <span class="k-n">${fmtDur(nTimed ? totSec / nTimed : 0)}</span>
+      <span class="k-s">จาก ${nTimed} ครั้งที่มีการบันทึกเวลา</span>
     </div>
     <div class="kpi">
       <span class="k-l">ผลการเล่นที่บันทึก</span>
@@ -3512,12 +3601,14 @@ function renderUsage() {
     <div class="tbl-scroll">
       <table class="dtable">
         <thead><tr>
-          <th>วันเวลา</th><th>ชื่อเล่น</th>
+          <th>วันเวลาที่เข้า</th><th>ชื่อเล่น</th><th>เวลาใช้งาน</th><th>ใช้ล่าสุด</th>
         </tr></thead>
         <tbody>
           ${data.slice(0, 50).map((v, i) => `<tr>
             <td>${fmt(v.at)}</td>
             <td>${anon ? "ผู้ใช้ " + String(i + 1).padStart(2, "0") : esc(v.name || "—")}</td>
+            <td class="num">${+v.sec > 0 ? fmtDur(v.sec) : "—"}</td>
+            <td>${v.lastAt ? fmt(v.lastAt) : "—"}</td>
           </tr>`).join("")}
         </tbody>
       </table>
@@ -3537,9 +3628,11 @@ $("#usageBody").addEventListener("click", ev => {
 });
 
 $("#btnUCsv").addEventListener("click", async () => {
-  const head = ["วันเวลา", "ชื่อเล่น"];
+  const head = ["วันเวลาที่เข้า", "ชื่อเล่น", "เวลาใช้งาน (นาที)", "ใช้ล่าสุด"];
   const lines = [head.join(",")].concat(usageRows(false).map(v => [
-    v.at ? new Date(v.at).toLocaleString("th-TH") : "", v.name
+    v.at ? new Date(v.at).toLocaleString("th-TH") : "", v.name,
+    (+v.sec || 0) ? (v.sec / 60).toFixed(1) : "",
+    v.lastAt ? new Date(v.lastAt).toLocaleString("th-TH") : ""
   ].map(x => `"${String(x == null ? "" : x).replace(/"/g, '""')}"`).join(",")));
   const csv = "\uFEFF" + lines.join("\n");
   const fname = "abg-nsskru-usage.csv";

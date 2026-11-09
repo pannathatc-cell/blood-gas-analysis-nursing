@@ -15,7 +15,7 @@ const ADMIN_KEY = 'nsskru12345';   // ต้องตรงกับรหัส
 
 const RESULT_HEADERS = ['id', 'เวลาเล่น', 'ชื่อเล่น', 'โหมด', 'คะแนน', 'ถูก', 'ผิด', 'ร้อยละถูก',
   'คอมโบสูงสุด', 'ชีวิตเหลือ', 'หัวข้อที่ตอบ (JSON)', 'บันทึกเมื่อ'];
-const VISIT_HEADERS = ['id', 'เวลาเข้าใช้', 'ชื่อเล่น', 'บันทึกเมื่อ'];
+const VISIT_HEADERS = ['id', 'เวลาเข้าใช้', 'ชื่อเล่น', 'บันทึกเมื่อ', 'ใช้งานล่าสุด', 'เวลาใช้งาน (นาที)'];
 const MODE_TH = { balloon: 'แทงลูกโป่ง', clinical: 'สถานการณ์คลินิก', shooter: 'ยิงไข่' };
 
 function setup() {
@@ -31,6 +31,11 @@ function sheet_(ss, name, headers) {
     sh.appendRow(headers);
     sh.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#B4241F').setFontColor('#ffffff');
     sh.setFrozenRows(1);
+  } else if (sh.getLastColumn() < headers.length) {
+    // เพิ่มหัวคอลัมน์ใหม่ให้แท็บเดิม (เช่น เวลาใช้งาน)
+    const from = sh.getLastColumn() + 1;
+    sh.getRange(1, from, 1, headers.length - from + 1).setValues([headers.slice(from - 1)])
+      .setFontWeight('bold').setBackground('#B4241F').setFontColor('#ffffff');
   }
   return sh;
 }
@@ -47,7 +52,7 @@ function doPost(e) {
     const vs = sheet_(ss, 'Visits', VISIT_HEADERS);
     const seenR = idSet_(rs), seenV = idSet_(vs);
     const now = new Date();
-    const rRows = [], vRows = [];
+    const rRows = [], vRows = [], sessions = [];
     items.forEach(it => {
       if (!it) return;
       if (it.action === 'saveResult' && it.record) {
@@ -62,16 +67,38 @@ function doPost(e) {
         const v = it.visit, id = clean_(v.id, 40);
         if (!id || seenV.has(id)) return;
         seenV.add(id);
-        vRows.push([id, toDate_(v.at), clean_(v.name, 24), now]);
+        vRows.push([id, toDate_(v.at), clean_(v.name, 24), now, '', '']);
+      } else if (it.action === 'saveSession' && it.visit) {
+        sessions.push(it);
       }
     });
     if (rRows.length) rs.getRange(rs.getLastRow() + 1, 1, rRows.length, RESULT_HEADERS.length).setValues(rRows);
     if (vRows.length) vs.getRange(vs.getLastRow() + 1, 1, vRows.length, VISIT_HEADERS.length).setValues(vRows);
-    return json_({ ok: true, saved: rRows.length + vRows.length });
+    sessions.forEach(it => saveSession_(vs, it, seenV, now));
+    return json_({ ok: true, saved: rRows.length + vRows.length + sessions.length });
   } catch (err) {
     return json_({ ok: false, error: String(err) });
   } finally {
     try { lock.releaseLock(); } catch (e) { }
+  }
+}
+
+/* เวลาใช้งาน: อัปเดตแถวของการเข้าใช้ครั้งนั้น (นับเฉพาะช่วงที่เปิดหน้าแอปและมีการใช้งาน) */
+function saveSession_(vs, it, seenV, now) {
+  const v = it.visit, id = clean_(v.id, 40);
+  if (!id) return;
+  const sec = Math.max(0, Math.min(24 * 3600, Number(it.sec) || 0));
+  const minutes = Math.round(sec / 6) / 10;
+  const last = toDate_(it.lastAt);
+  const found = vs.getRange(2, 1, Math.max(1, vs.getLastRow() - 1), 1)
+    .createTextFinder(id).matchEntireCell(true).findNext();
+  if (found) {
+    const row = found.getRow();
+    const prev = Number(vs.getRange(row, 6).getValue()) || 0;
+    if (minutes >= prev) vs.getRange(row, 5, 1, 2).setValues([[last, minutes]]);
+  } else if (!seenV.has(id)) {
+    seenV.add(id);
+    vs.appendRow([id, toDate_(v.at), clean_(v.name, 24), now, last, minutes]);
   }
 }
 
@@ -89,7 +116,9 @@ function doGet(e) {
     items: parse_(r[10]), sid: '', group: '', gender: '', role: ''
   }));
   const visits = rows_(sheet_(ss, 'Visits', VISIT_HEADERS), 6000).map(r => ({
-    id: String(r[0]), at: iso_(r[1]), name: String(r[2]), kind: 'visit', sid: '', group: '', gender: '', role: ''
+    id: String(r[0]), at: iso_(r[1]), name: String(r[2]), kind: 'visit',
+    lastAt: r[4] ? iso_(r[4]) : '', sec: Math.round((Number(r[5]) || 0) * 60),
+    sid: '', group: '', gender: '', role: ''
   }));
   return json_({ ok: true, results, visits });
 }
