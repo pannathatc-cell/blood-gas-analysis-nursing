@@ -20,8 +20,20 @@ const MODE_TH = { balloon: 'แทงลูกโป่ง', clinical: 'สถ�
 
 function setup() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
-  sheet_(ss, 'Results', RESULT_HEADERS);
-  sheet_(ss, 'Visits', VISIT_HEADERS);
+  formatSheets_(ss, sheet_(ss, 'Results', RESULT_HEADERS), sheet_(ss, 'Visits', VISIT_HEADERS));
+}
+
+/* เวลาไทย และแสดงวันที่ + เวลาเข้าใช้แบบ 09/11/2026  09.45 น. (ทำครั้งเดียว) */
+const TIME_FMT = 'dd/mm/yyyy  HH.mm "น."';
+function formatSheets_(ss, rs, vs) {
+  ss.setSpreadsheetTimeZone('Asia/Bangkok');
+  rs.getRange('B:B').setNumberFormat(TIME_FMT);
+  rs.getRange('L:L').setNumberFormat(TIME_FMT);
+  vs.getRange('B:B').setNumberFormat(TIME_FMT);
+  vs.getRange('D:E').setNumberFormat(TIME_FMT);
+  vs.getRange('F:F').setNumberFormat('0.0');
+  rs.getRange('1:1').setNumberFormat('@'); vs.getRange('1:1').setNumberFormat('@');
+  PropertiesService.getScriptProperties().setProperty('fmt', 'v3');
 }
 
 function sheet_(ss, name, headers) {
@@ -50,6 +62,7 @@ function doPost(e) {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const rs = sheet_(ss, 'Results', RESULT_HEADERS);
     const vs = sheet_(ss, 'Visits', VISIT_HEADERS);
+    if (PropertiesService.getScriptProperties().getProperty('fmt') !== 'v3') formatSheets_(ss, rs, vs);
     const seenR = idSet_(rs), seenV = idSet_(vs);
     const now = new Date();
     const rRows = [], vRows = [], sessions = [];
