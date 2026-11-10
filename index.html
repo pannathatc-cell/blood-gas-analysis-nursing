@@ -336,6 +336,12 @@ ol.care li b{color:var(--brand-deep)}
 .lives{display:flex;gap:5px;align-items:center}
 .lives img{height:34px;width:auto;max-width:none;display:block;transition:opacity .3s,transform .3s,filter .3s;filter:drop-shadow(0 2px 3px rgba(124,21,18,.25))}
 .lives img.lost{opacity:.25;transform:scale(.8);filter:grayscale(1)}
+.speed-btn{
+  font-family:Kanit,"IBM Plex Sans Thai",sans-serif;font-weight:600;font-size:.9rem;cursor:pointer;
+  border:1.5px solid var(--line);background:#FFFCFA;color:var(--ink);border-radius:999px;padding:6px 14px;min-height:38px;
+}
+.speed-btn:hover{border-color:var(--brand)}
+.speed-btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .icon-btn{
   border:1px solid var(--line);background:#fff;border-radius:9px;cursor:pointer;
   width:38px;height:38px;display:grid;place-items:center;font-size:1.05rem;transition:.15s;
@@ -1059,6 +1065,7 @@ ol.care li b{color:var(--brand-deep)}
         <div id="comboSlot"></div>
         <div class="spacer"></div>
         <div class="lives" id="hLives"></div>
+        <button class="speed-btn" id="btnSpeed" type="button" title="ปรับความเร็วลูกโป่ง" hidden>🐢 ช้า</button>
         <button class="icon-btn" id="btnSound" title="เปิด/ปิดเสียง">🔊</button>
         <button class="icon-btn" id="btnQuit" title="ออกจากเกม">✕</button>
       </div>
@@ -2020,6 +2027,8 @@ function startGame(mode) {
   $("#stageBalloon").classList.toggle("hidden", mode !== "balloon");
   $("#stageShooter").classList.toggle("hidden", mode !== "shooter");
   $("#stageClinical").classList.toggle("hidden", mode !== "clinical");
+  $("#btnSpeed").hidden = mode !== "balloon";
+  paintSpeed();
   $("#timerFill").style.width = "100%";
   $("#timerFill").classList.remove("warn");
   updateHUD();
@@ -2029,6 +2038,25 @@ function startGame(mode) {
 }
 
 /* ---------- BALLOON MODE ---------- */
+/* ความเร็วลูกโป่ง: ค่าเริ่มต้น "ช้า" ให้มีเวลาคิด; v = ตัวคูณความเร็ว, t = ตัวคูณเวลาต่อด่าน */
+const SPEEDS = {
+  slow:   { v: 0.42, t: 1.6,  label: "🐢 ช้า" },
+  normal: { v: 0.7,  t: 1.25, label: "🚶 ปกติ" },
+  fast:   { v: 1.0,  t: 1.0,  label: "🐇 เร็ว" }
+};
+const SPEED_ORDER = ["slow", "normal", "fast"];
+let SPEED = "slow";
+try { SPEED = JSON.parse(localStorage.getItem("abg.balloonSpeed")) || "slow"; } catch (e) { }
+if (!SPEEDS[SPEED]) SPEED = "slow";
+function paintSpeed() { $("#btnSpeed").textContent = SPEEDS[SPEED].label; }
+$("#btnSpeed").addEventListener("click", () => {
+  const old = SPEEDS[SPEED];
+  SPEED = SPEED_ORDER[(SPEED_ORDER.indexOf(SPEED) + 1) % SPEED_ORDER.length];
+  try { localStorage.setItem("abg.balloonSpeed", JSON.stringify(SPEED)); } catch (e) { }
+  paintSpeed();
+  const k = SPEEDS[SPEED].t / old.t;           // ปรับเวลาที่เหลือของด่านปัจจุบันตามสัดส่วน
+  G.timeLeft *= k; G.roundTime *= k;
+});
 function makeBalloon(cfg, idx, count) {
   const r = arena.getBoundingClientRect();
   const w = r.width < 560 ? 112 : 132;
@@ -2049,7 +2077,7 @@ function makeBalloon(cfg, idx, count) {
     el,
     x: lane * laneW + laneW / 2 - w / 2 + (Math.random() * 14 - 7),
     y: r.height * (0.05 + 0.15 * lane) + row * (r.height * 0.5 + 90) + Math.random() * 30,
-    vy: (REDUCED ? 18 : 27) + Math.random() * 9 + G.round * 2.4,
+    vy: (REDUCED ? 18 : 27) + Math.random() * 6 + G.round * 1.2,
     sway: 10 + Math.random() * 12,
     phase: Math.random() * Math.PI * 2,
     w, ok: cfg.ok, data: cfg, alive: true
@@ -2072,7 +2100,7 @@ function nextBalloonRound() {
   G.answered = false;
   const isBonus = (G.round === 3 || G.round === 7);
   G.isBonus = isBonus;
-  G.roundTime = isBonus ? 20 : Math.max(11, 19 - G.round * 0.7);
+  G.roundTime = (isBonus ? 20 : Math.max(13, 19 - G.round * 0.5)) * SPEEDS[SPEED].t;
   G.timeLeft = G.roundTime;
 
   if (isBonus) {
@@ -2136,7 +2164,7 @@ function step(ts) {
 
   G.balloons.forEach(b => {
     if (!b.alive) return;
-    b.y -= b.vy * dt;
+    b.y -= b.vy * SPEEDS[SPEED].v * dt;
     b.phase += dt * 1.1;
     if (b.y < -210) b.y = r.height + 60;
     const dx = Math.sin(b.phase) * b.sway;
