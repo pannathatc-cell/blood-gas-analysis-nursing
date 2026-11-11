@@ -1045,7 +1045,7 @@ ol.care li b{color:var(--brand-deep)}
           <span class="mc-ico">🏥</span>
           <span class="tagline">โหมดคิดวิเคราะห์</span>
           <h3>สถานการณ์ข้างเตียง</h3>
-          <p>เคสผู้ป่วยจริงพร้อมผล ABG เลือก<b>การพยาบาลลำดับความสำคัญ</b>ที่ถูกที่สุด พร้อมเหตุผลกำกับทุกข้อ</p>
+          <p>ตัวอย่างเคสผู้ป่วยพร้อมผล ABG เลือก<b>การพยาบาลลำดับความสำคัญ</b>ที่ถูกที่สุด พร้อมเหตุผลกำกับทุกข้อ</p>
         </button>
       </div>
       <div class="legend">
@@ -2277,7 +2277,7 @@ function nextClinicalRound() {
   G.answered = false;
   const item = G.clinPool[G.round % G.clinPool.length];
   G.item = item;
-  $("#clinScenario").innerHTML = `<div class="scenario"><span class="pt">สถานการณ์ที่ ${G.round + 1}</span>${item.scenario}</div>`;
+  $("#clinScenario").innerHTML = `<div class="scenario"><span class="pt">ตัวอย่างเคสที่ ${G.round + 1}</span>${item.scenario}</div>`;
   const a = item.abg;
   const cls = (v, lo, hi) => v > hi ? "hi" : v < lo ? "lo" : "";
   $("#clinReadout").innerHTML =
